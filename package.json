@@ -16,7 +16,8 @@
   "private": true,
   "sideEffects": false,
   "dependencies": {
-    "jose": "^6.2.3"
+    "jose": "^6.2.3",
+    "server-only": "^0.0.1"
   },
   "devDependencies": {
     "@types/node": "^26.0.1",

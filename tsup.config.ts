@@ -1,27 +1,57 @@
 import { defineConfig } from "tsup";
 
-// Four independent entry points, each a subpath export. Keeping them separate
-// is the packaging-level enforcement of the runtime boundary:
+// Two build passes. Splitting them lets the client pass re-add the "use client"
+// directive (esbuild strips module-level directives when bundling) without
+// polluting the server/core/edge outputs.
+//
+// The four entries map 1:1 to the package's subpath exports, which is the
+// packaging-level enforcement of the runtime boundary:
 //   - server: Node-only (jose decode, single-flight rotation, cookie writes)
 //   - client: "use client" React hooks/provider
 //   - edge:   Edge-safe ONLY (presence-only proxy gate — never decodes the JWE)
 //   - core:   runtime-agnostic types + crypto primitives
-export default defineConfig({
-  entry: {
-    "core/index": "src/core/index.ts",
-    "server/index": "src/server/index.ts",
-    "client/index": "src/client/index.ts",
-    "edge/index": "src/edge/index.ts",
-  },
-  format: ["esm"],
+const shared = {
+  format: ["esm"] as const,
   dts: true,
-  clean: true,
   treeshake: true,
-  // Provided by the consuming app — never bundle these.
+  splitting: false,
   external: ["next", "react", "react-dom", "react/jsx-runtime", "server-only"],
-  // Preserve "use client" / "use server" directives in emitted files.
-  banner: {},
-  esbuildOptions(options) {
+  esbuildOptions(options: { legalComments?: string }) {
     options.legalComments = "none";
   },
-});
+};
+
+export default defineConfig([
+  {
+    ...shared,
+    clean: true,
+    entry: {
+      "core/index": "src/core/index.ts",
+      "server/index": "src/server/index.ts",
+      "edge/index": "src/edge/index.ts",
+    },
+  },
+  {
+    format: ["esm"] as const,
+    dts: true,
+    treeshake: true,
+    splitting: false,
+    external: ["next", "react", "react-dom", "react/jsx-runtime", "server-only"],
+    clean: false,
+    entry: { "client/index": "src/client/index.tsx" },
+    esbuildOptions(options: { legalComments?: string }) {
+      options.legalComments = "none";
+    },
+    // esbuild strips a "use client" banner as a "module level directive", so we
+    // re-add it after the bundle is written. The directive must be the very
+    // first line for React Server Components to treat this as a client boundary.
+    onSuccess: async () => {
+      const { readFile, writeFile } = await import("node:fs/promises");
+      const path = "dist/client/index.js";
+      const code = await readFile(path, "utf8");
+      if (!code.startsWith('"use client"')) {
+        await writeFile(path, `"use client";\n${code}`);
+      }
+    },
+  },
+]);
