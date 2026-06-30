@@ -18,11 +18,16 @@ interface RotationResult<TUser> {
   encoded: string;
 }
 
-// Process-wide rotator per config instance (created in createAuth).
-export const buildGetSession = <TUser>(config: AuthConfig<TUser>) => {
+/**
+ * The shared server engine. Owns the one cookie writer, the one decoder, and
+ * the single-flight rotator — used by getSession (rotation), signIn (mint), and
+ * the route handlers. Created once per config in createAuth().
+ */
+export const buildEngine = <TUser>(config: AuthConfig<TUser>) => {
   const rotator = new Rotator<RotationResult<TUser>>();
   const ttl = config.accessTokenTtl ?? DEFAULT_ACCESS_TOKEN_TTL;
   const signInPath = config.pages?.signIn ?? DEFAULT_SIGNIN_PAGE;
+  const rememberMaxAge = config.cookie?.rememberMaxAge ?? 30 * 24 * 60 * 60;
 
   const isHttps = async (): Promise<boolean> => {
     const h = await headers();
@@ -32,6 +37,20 @@ export const buildGetSession = <TUser>(config: AuthConfig<TUser>) => {
 
   const cookieName = async (): Promise<string> =>
     resolveCookieName(config.cookie?.name, await isHttps());
+
+  /** Encode claims and persist the cookie. Lifetime keys on `remember`. */
+  const mintAndWrite = async (
+    claims: SessionClaims<TUser>,
+  ): Promise<string> => {
+    // JWE exp is bounded by the remember window even for session cookies, so a
+    // browser-restored session cookie can never outlive the backend window.
+    const encoded = await encodeSession(claims, {
+      secret: config.secret,
+      maxAgeSeconds: rememberMaxAge,
+    });
+    await writeCookie(encoded, claims.remember);
+    return encoded;
+  };
 
   const writeCookie = async (
     encoded: string,
@@ -56,6 +75,15 @@ export const buildGetSession = <TUser>(config: AuthConfig<TUser>) => {
     }
   };
 
+  const clearCookie = async (): Promise<void> => {
+    try {
+      const store = await cookies();
+      store.delete(await cookieName());
+    } catch {
+      // read-only context — ignore.
+    }
+  };
+
   const readClaims = async (): Promise<SessionClaims<TUser> | null> => {
     const store = await cookies();
     const raw = store.get(await cookieName())?.value;
@@ -65,8 +93,9 @@ export const buildGetSession = <TUser>(config: AuthConfig<TUser>) => {
 
   /**
    * THE mutator. Decode → if expired & has refresh, rotate (single-flight) →
-   * write cookie → return current claims. Returns null when there is no
-   * recoverable session.
+   * write cookie → return current claims. Returns null when no recoverable
+   * session; returns claims with error="RefreshTokenError" when the rotator
+   * gave up (so the client signs out).
    */
   const getSession = async (): Promise<SessionClaims<TUser> | null> => {
     const claims = await readClaims();
@@ -75,52 +104,54 @@ export const buildGetSession = <TUser>(config: AuthConfig<TUser>) => {
     const nowSec = Math.floor(Date.now() / 1000);
     if (claims.tokenExpiry > nowSec) return claims;
 
-    // Expired.
     if (!claims.refreshToken) return null;
     const oldToken = claims.refreshToken;
 
     try {
-      const { claims: next, encoded } = await rotator.rotate(oldToken, async () => {
+      const { claims: next } = await rotator.rotate(oldToken, async () => {
         const h = await headers();
         const raw = await config.backend.refresh(oldToken, { headers: h });
-        const mapped = config.mapTokenResponse(raw);
+        const mapped = config.mapTokenResponse(raw, {
+          kind: "refresh",
+          remember: claims.remember,
+          previous: claims,
+        });
         const newClaims: SessionClaims<TUser> = {
           accessToken: mapped.accessToken,
           refreshToken: mapped.refreshToken,
-          tokenExpiry: Math.floor(Date.now() / 1000) + (mapped.ttlSeconds ?? ttl),
+          tokenExpiry:
+            Math.floor(Date.now() / 1000) + (mapped.ttlSeconds ?? ttl),
           user: mapped.user,
-          remember: claims.remember,
+          remember: mapped.remember ?? claims.remember,
           authMethod: claims.authMethod,
         };
-        const enc = await encodeSession(newClaims, {
-          secret: config.secret,
-          maxAgeSeconds: resolveMaxAge(config, newClaims.remember),
-        });
-        return { claims: newClaims, encoded: enc };
+        const encoded = await mintAndWrite(newClaims);
+        return { claims: newClaims, encoded };
       });
-
-      await writeCookie(encoded, next.remember);
       return next;
     } catch {
       return { ...claims, error: "RefreshTokenError" };
     }
   };
 
-  /** getSession() that redirects to the sign-in page when there is no session. */
   const requireSession = async (): Promise<SessionClaims<TUser>> => {
     const session = await getSession();
     if (!session || session.error) redirect(signInPath);
     return session;
   };
 
-  return { getSession, requireSession, writeCookie, cookieName };
+  return {
+    config,
+    ttl,
+    rememberMaxAge,
+    isHttps,
+    cookieName,
+    readClaims,
+    mintAndWrite,
+    clearCookie,
+    getSession,
+    requireSession,
+  };
 };
 
-const resolveMaxAge = <TUser>(config: AuthConfig<TUser>, remember: boolean): number => {
-  if (!remember) {
-    // Session cookie: JWE exp still bounded; use the remember window as a ceiling
-    // so a restored-tab session cookie can't outlive the backend window.
-    return config.cookie?.rememberMaxAge ?? 30 * 24 * 60 * 60;
-  }
-  return config.cookie?.rememberMaxAge ?? 30 * 24 * 60 * 60;
-};
+export type Engine<TUser> = ReturnType<typeof buildEngine<TUser>>;

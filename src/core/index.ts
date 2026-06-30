@@ -11,4 +11,4 @@ export {
   DEFAULT_ACCESS_TOKEN_TTL,
   DEFAULT_SIGNIN_PAGE,
 } from "./config.js";
-export type { AuthConfig, RequestCtx } from "./config.js";
+export type { AuthConfig, RequestCtx, MapContext } from "./config.js";

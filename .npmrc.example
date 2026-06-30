@@ -1,0 +1,19 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Gitea npm registry config for @lankacom/auth
+#
+# Copy this file to `.npmrc` and replace the placeholders. `.npmrc` is
+# gitignored so your token never gets committed.
+#
+#   git-v2.lankapanel.net   e.g. git.lankacom.lk           (no scheme in the //... lines)
+#   Lankacom  the user OR org that owns the package, e.g. lankacom
+#   GITEA_TOKEN  a Gitea access token with `package:write` (publish) scope
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Route the @lankacom scope to the Gitea registry (publish + install).
+@lankacom:registry=https://git-v2.lankapanel.net/api/packages/Lankacom/npm/
+
+# Auth for that registry. The key must match the registry host+path above.
+//git-v2.lankapanel.net/api/packages/Lankacom/npm/:_authToken=GITEA_TOKEN
+
+# Optional: pnpm/npm sometimes auth against the bare host too.
+//git-v2.lankapanel.net/:_authToken=GITEA_TOKEN

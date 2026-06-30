@@ -7,6 +7,16 @@ export interface RequestCtx {
   headers?: Headers | Record<string, string>;
 }
 
+/** Context for mapTokenResponse — the login/rotation intent. */
+export interface MapContext<TUser> {
+  /** "login" (fresh credentials), "pre-issued" (SSO/MFA), or "refresh" (rotation). */
+  kind: "login" | "pre-issued" | "refresh";
+  /** The remember-me intent from the caller. */
+  remember: boolean;
+  /** Pre-rotation claims, present only when kind === "refresh". */
+  previous?: SessionClaims<TUser>;
+}
+
 /**
  * The single injection point that makes the engine app-agnostic. The app
  * supplies policy (endpoints, header names, what a valid user is); the engine
@@ -23,13 +33,26 @@ export interface AuthConfig<TUser> {
   /** Access-token lifetime (seconds) used to compute tokenExpiry. Default 14m. */
   accessTokenTtl?: number;
 
-  /** Map an arbitrary backend response → canonical claims. REQUIRED. */
-  mapTokenResponse(raw: unknown): {
+  /**
+   * Map an arbitrary backend response → canonical claims. REQUIRED.
+   *
+   * `ctx.remember` and `ctx.kind` let the app decide policy that depends on the
+   * login intent rather than the response body — e.g. only keep a refresh token
+   * when remember is on, or shorten the TTL when the user must change password.
+   * For rotation, `ctx.previous` carries the pre-rotation claims so the app can
+   * carry forward identity the refresh response omits.
+   */
+  mapTokenResponse(
+    raw: unknown,
+    ctx: MapContext<TUser>,
+  ): {
     accessToken: string;
     refreshToken?: string;
     user: TUser;
     /** Per-response TTL override (e.g. short-lived must-change-password). */
     ttlSeconds?: number;
+    /** Override the remember flag (e.g. force false when mustChangePassword). */
+    remember?: boolean;
   };
 
   /** Backend calls. App owns URLs, header names, body shapes, body.status. */

@@ -24,7 +24,10 @@ const shared = {
 export default defineConfig([
   {
     ...shared,
-    clean: true,
+    // clean is done by the "build" script (rimraf-free: see package script) so
+    // the two concurrent passes don't race — a `clean: true` here would wipe
+    // the client pass's freshly-written dts.
+    clean: false,
     entry: {
       "core/index": "src/core/index.ts",
       "server/index": "src/server/index.ts",

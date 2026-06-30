@@ -1,0 +1,44 @@
+import "server-only";
+import type { SessionClaims } from "../core/index.js";
+import type { Engine } from "./engine.js";
+
+/**
+ * Route-handler factories the app mounts in the App Router.
+ *
+ * The session handler returns a READ-ONLY snapshot for the client provider. It
+ * decodes (and may trigger rotation via getSession), but it NEVER exposes the
+ * refresh token to the client — that token is the rotation secret and lives
+ * only in the HttpOnly cookie.
+ */
+export const buildHandlers = <TUser>(engine: Engine<TUser>) => {
+  /** Strip server-only secrets before sending to the browser. */
+  const toClientSnapshot = (claims: SessionClaims<TUser>) => {
+    const { refreshToken: _omit, ...safe } = claims;
+    return safe;
+  };
+
+  /** GET /api/auth/session — read-only snapshot for useSession(). */
+  const session = async (): Promise<Response> => {
+    const claims = await engine.getSession();
+    if (!claims || claims.error) {
+      return Response.json(null, { status: 200 });
+    }
+    return Response.json(toClientSnapshot(claims), { status: 200 });
+  };
+
+  /** POST /api/auth/signout — backend logout + clear cookie. */
+  const signout = async (): Promise<Response> => {
+    const claims = await engine.readClaims();
+    if (claims && engine.config.backend.logout) {
+      try {
+        await engine.config.backend.logout(claims, {});
+      } catch {
+        // best-effort backend logout; clear locally regardless.
+      }
+    }
+    await engine.clearCookie();
+    return Response.json({ ok: true }, { status: 200 });
+  };
+
+  return { session, signout, toClientSnapshot };
+};

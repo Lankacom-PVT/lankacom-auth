@@ -1,6 +1,8 @@
 import "server-only";
 import type { AuthConfig, SessionClaims } from "../core/index.js";
-import { buildGetSession } from "./getSession.js";
+import { buildEngine } from "./engine.js";
+import { buildSignIn, type SignInResult } from "./signIn.js";
+import { buildHandlers } from "./handlers.js";
 
 export interface ServerAuth<TUser> {
   /** THE session mutator: decode → rotate-if-expired → write cookie → return. */
@@ -9,6 +11,12 @@ export interface ServerAuth<TUser> {
   requireSession(): Promise<SessionClaims<TUser>>;
   /** Build authenticated app→backend headers from the current session. */
   authHeaders(): Promise<Record<string, string>>;
+  /** Sign-in producers: credentials / pre-issued (MFA) / sso (broker). */
+  signIn: ReturnType<typeof buildSignIn<TUser>>;
+  /** Clear the session cookie (no backend call). */
+  clearSession(): Promise<void>;
+  /** Route-handler factories: session (snapshot), signout. */
+  handlers: ReturnType<typeof buildHandlers<TUser>>;
 }
 
 /**
@@ -17,15 +25,24 @@ export interface ServerAuth<TUser> {
  * names your call sites already use.
  */
 export const createAuth = <TUser>(config: AuthConfig<TUser>): ServerAuth<TUser> => {
-  const { getSession, requireSession } = buildGetSession(config);
+  const engine = buildEngine(config);
+  const signIn = buildSignIn(engine);
+  const handlers = buildHandlers(engine);
 
   const authHeaders = async (): Promise<Record<string, string>> => {
-    const session = await getSession();
+    const session = await engine.getSession();
     if (!session) return {};
     return config.buildAuthHeaders(session);
   };
 
-  return { getSession, requireSession, authHeaders };
+  return {
+    getSession: engine.getSession,
+    requireSession: engine.requireSession,
+    authHeaders,
+    signIn,
+    clearSession: engine.clearCookie,
+    handlers,
+  };
 };
 
-export type { ServerAuth as ServerAuthApi };
+export type { ServerAuth as ServerAuthApi, SignInResult };
