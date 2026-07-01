@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import type { SessionClaims, SessionStatus } from "../core/index.js";
+import type { RegisteredUser } from "@lankacom/auth/register";
 
 /**
  * Client session is READ-ONLY. It fetches a snapshot from a route handler that
@@ -22,7 +23,7 @@ interface SessionContextValue<TUser> {
 
 const SessionContext = createContext<SessionContextValue<unknown> | null>(null);
 
-export interface SessionProviderProps<TUser = unknown> {
+export interface SessionProviderProps<TUser = RegisteredUser> {
   children: ReactNode;
   /**
    * Server-resolved session snapshot, passed from a server component (the root
@@ -42,7 +43,7 @@ export interface SessionProviderProps<TUser = unknown> {
   sessionEndpoint?: string;
 }
 
-export const SessionProvider = <TUser = unknown,>({
+export const SessionProvider = <TUser = RegisteredUser,>({
   children,
   initialSession = null,
   refetchOnMount = true,
@@ -58,6 +59,31 @@ export const SessionProvider = <TUser = unknown,>({
         ? "loading"
         : "unauthenticated",
   });
+
+  // Re-seed when the SERVER prop changes. The provider typically lives in the
+  // root layout and PERSISTS across soft navigations (e.g. a Server Action
+  // `redirect()` after login). useState only reads its initializer on the
+  // first mount, so a freshly server-rendered `initialSession` would otherwise
+  // be ignored and useSession() would stay stale until a hard reload. We key
+  // on the session's identity (access token + expiry) so a new server-rendered
+  // object with the same content doesn't loop, but a real login/logout/rotation
+  // is adopted immediately.
+  const seedKey = initialSession
+    ? `${initialSession.accessToken}:${initialSession.tokenExpiry}`
+    : null;
+  useEffect(() => {
+    setState((prev) => {
+      const prevKey = prev.data
+        ? `${prev.data.accessToken}:${prev.data.tokenExpiry}`
+        : null;
+      if (prevKey === seedKey) return prev; // no change → don't churn
+      return {
+        data: (initialSession as SessionClaims<unknown> | null) ?? null,
+        status: initialSession ? "authenticated" : "unauthenticated",
+      };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seedKey]);
 
   useEffect(() => {
     if (!refetchOnMount) return;
@@ -86,7 +112,7 @@ export const SessionProvider = <TUser = unknown,>({
 };
 
 /** Drop-in for next-auth's useSession — but returns no update(). */
-export const useSession = <TUser = Record<string, unknown>>(): {
+export const useSession = <TUser = RegisteredUser>(): {
   data: SessionClaims<TUser> | null;
   status: SessionStatus;
 } => {

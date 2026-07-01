@@ -1,6 +1,7 @@
 export type { SessionClaims, SessionStatus } from "./claims.js";
-export { encodeSession, decodeSession } from "./jwt.js";
-export type { EncodeOptions } from "./jwt.js";
+export type { Register, RegisteredUser } from "@lankacom/auth/register";
+export { encodeSession, decodeSession, MIN_SECRET_LENGTH } from "./jwt.js";
+export type { EncodeOptions, DecodeOptions } from "./jwt.js";
 export {
   resolveCookieName,
   resolveCookieAttributes,

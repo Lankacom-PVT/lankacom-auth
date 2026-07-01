@@ -1,6 +1,8 @@
 import "server-only";
+import { headers } from "next/headers";
 import type { SessionClaims } from "../core/index.js";
 import type { Engine } from "./engine.js";
+import { verifySameOrigin } from "./csrf.js";
 
 /**
  * Route-handler factories the app mounts in the App Router.
@@ -26,8 +28,19 @@ export const buildHandlers = <TUser>(engine: Engine<TUser>) => {
     return Response.json(toClientSnapshot(claims), { status: 200 });
   };
 
-  /** POST /api/auth/signout — backend logout + clear cookie. */
+  /**
+   * POST /api/auth/signout — backend logout + clear cookie.
+   *
+   * State-changing, and the SameSite=Lax cookie still rides cross-site form
+   * POSTs, so we CSRF-guard it with a fail-closed same-origin check (honoring
+   * the app's `trustedOrigins` allowlist). A request whose Origin/Referer can't
+   * be verified is rejected rather than silently logged out.
+   */
   const signout = async (): Promise<Response> => {
+    const h = await headers();
+    if (!verifySameOrigin(h, { trustedOrigins: engine.config.trustedOrigins })) {
+      return Response.json({ ok: false, error: "bad origin" }, { status: 403 });
+    }
     const claims = await engine.readClaims();
     if (claims && engine.config.backend.logout) {
       try {

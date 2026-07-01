@@ -12,6 +12,15 @@ export interface CookieConfig {
   name?: string;
   /** Sliding-window length (seconds) for remember-me sessions. Default 30d. */
   rememberMaxAge?: number;
+  /**
+   * JWE-exp ceiling (seconds) for NON-remember sessions. The cookie stays a
+   * browser session cookie regardless; this only caps how long a browser-
+   * restored / kept-open non-remember session may keep refreshing. Defaults to
+   * `rememberMaxAge`. Set it near your refresh token's lifetime when
+   * `alwaysPersistRefreshToken` is on. Not a cookie `maxAge` — session cookies
+   * never carry one.
+   */
+  sessionMaxAge?: number;
   sameSite?: "lax" | "strict" | "none";
 }
 

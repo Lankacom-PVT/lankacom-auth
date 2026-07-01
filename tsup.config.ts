@@ -10,12 +10,25 @@ import { defineConfig } from "tsup";
 //   - client: "use client" React hooks/provider
 //   - edge:   Edge-safe ONLY (presence-only proxy gate — never decodes the JWE)
 //   - core:   runtime-agnostic types + crypto primitives
+// `@lankacom/auth/register` is marked external in every OTHER entry's bundle so
+// its `Register` interface is referenced by module specifier — never inlined
+// into a hashed dts chunk. That stable, importable module name is what makes
+// `declare module "@lankacom/auth/register"` augmentation merge correctly.
+const REGISTER_SPECIFIER = "@lankacom/auth/register";
+
 const shared = {
   format: ["esm"] as const,
   dts: true,
   treeshake: true,
   splitting: false,
-  external: ["next", "react", "react-dom", "react/jsx-runtime", "server-only"],
+  external: [
+    "next",
+    "react",
+    "react-dom",
+    "react/jsx-runtime",
+    "server-only",
+    REGISTER_SPECIFIER,
+  ],
   esbuildOptions(options: { legalComments?: string }) {
     options.legalComments = "none";
   },
@@ -29,6 +42,9 @@ export default defineConfig([
     // the client pass's freshly-written dts.
     clean: false,
     entry: {
+      // Standalone, never-bundled entry: the canonical declaration site for the
+      // augmentable `Register` interface.
+      "register": "src/register.ts",
       "core/index": "src/core/index.ts",
       "server/index": "src/server/index.ts",
       "edge/index": "src/edge/index.ts",
@@ -39,7 +55,14 @@ export default defineConfig([
     dts: true,
     treeshake: true,
     splitting: false,
-    external: ["next", "react", "react-dom", "react/jsx-runtime", "server-only"],
+    external: [
+      "next",
+      "react",
+      "react-dom",
+      "react/jsx-runtime",
+      "server-only",
+      REGISTER_SPECIFIER,
+    ],
     clean: false,
     entry: { "client/index": "src/client/index.tsx" },
     esbuildOptions(options: { legalComments?: string }) {

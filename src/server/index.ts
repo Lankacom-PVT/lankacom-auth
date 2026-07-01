@@ -3,12 +3,20 @@ import type { AuthConfig, SessionClaims } from "../core/index.js";
 import { buildEngine } from "./engine.js";
 import { buildSignIn, type SignInResult } from "./signIn.js";
 import { buildHandlers } from "./handlers.js";
+export { verifySameOrigin } from "./csrf.js";
+export type { SameOriginOptions } from "./csrf.js";
 
 export interface ServerAuth<TUser> {
   /** THE session mutator: decode → rotate-if-expired → write cookie → return. */
   getSession(): Promise<SessionClaims<TUser> | null>;
   /** getSession() + redirect to sign-in when there is no recoverable session. */
   requireSession(): Promise<SessionClaims<TUser>>;
+  /**
+   * Force a single-flight rotation regardless of expiry — for the 401-retry
+   * pattern (token rejected early by the backend). Returns the rotated session,
+   * or claims with error="RefreshTokenError" on failure, or null if no session.
+   */
+  forceRefresh(): Promise<SessionClaims<TUser> | null>;
   /** Build authenticated app→backend headers from the current session. */
   authHeaders(): Promise<Record<string, string>>;
   /** Sign-in producers: credentials / pre-issued (MFA) / sso (broker). */
@@ -38,6 +46,7 @@ export const createAuth = <TUser>(config: AuthConfig<TUser>): ServerAuth<TUser> 
   return {
     getSession: engine.getSession,
     requireSession: engine.requireSession,
+    forceRefresh: engine.forceRefresh,
     authHeaders,
     signIn,
     clearSession: engine.clearCookie,

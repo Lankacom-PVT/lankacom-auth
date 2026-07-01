@@ -1,10 +1,13 @@
+import type { RegisteredUser } from "@lankacom/auth/register";
+
 /**
  * Canonical session claims the engine understands. Apps extend the user shape
- * via the generic `TUser`; everything else is auth-mechanism state the engine
- * owns. `tokenExpiry` is ALWAYS epoch SECONDS (not ms) — a hard invariant
- * shared with the backend.
+ * via the generic `TUser` (defaulting to the registered user type — see
+ * `@lankacom/auth/register`); everything else is auth-mechanism state the
+ * engine owns. `tokenExpiry` is ALWAYS epoch SECONDS (not ms) — a hard
+ * invariant shared with the backend.
  */
-export interface SessionClaims<TUser = Record<string, unknown>> {
+export interface SessionClaims<TUser = RegisteredUser> {
   /** Bearer access token attached to authenticated backend calls. */
   accessToken: string;
   /** Single-use refresh token. Present only when remember-me is on. */

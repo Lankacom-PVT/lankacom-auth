@@ -30,8 +30,62 @@ export interface AuthConfig<TUser> {
 
   cookie?: CookieConfig;
 
+  /**
+   * Force the `Secure` cookie attribute (and `__Secure-` name prefix) ON,
+   * regardless of the `x-forwarded-proto` header. Set this `true` in any
+   * production deployment served over HTTPS: without it, cookie security is
+   * derived from a client-controllable forwarded header, so a stripped or
+   * spoofed header can downgrade the cookie. Default false (derive from proto)
+   * to keep plain-HTTP local dev working.
+   */
+  forceSecureCookie?: boolean;
+
+  /**
+   * Extra origins (beyond the app's own host) allowed to call state-changing
+   * auth endpoints — the CSRF same-origin allowlist. Leave empty for a
+   * single-domain app; the request's own host is always trusted. Format:
+   * scheme + host [+ port], e.g. ["https://app.example.com"].
+   */
+  trustedOrigins?: string[];
+
+  /**
+   * JWE `iss`/`aud` binding. When set, the encoded cookie carries these claims
+   * and decode REJECTS a cookie whose issuer/audience don't match — so a cookie
+   * minted by one app (or a different audience sharing the same secret) is not
+   * silently accepted here. Optional but recommended when a secret is shared
+   * across services.
+   */
+  issuer?: string;
+  audience?: string;
+
+  /**
+   * Keep (and rotate) the refresh token for NON-remember sessions too.
+   *
+   * By default (`false`) the refresh token is stored only when `remember` is on,
+   * so a `remember=false` session simply expires when its access token does —
+   * no silent renewal. That assumes the access token is long-lived enough to
+   * cover a browsing session on its own.
+   *
+   * Set `true` when the backend issues a SHORT-lived access token that must be
+   * refreshed to keep a session alive even without remember-me. Then:
+   *   - the refresh token is stored in ALL sessions and rotation works for both;
+   *   - `remember` now controls COOKIE LIFETIME ONLY — remember=false is still a
+   *     browser SESSION cookie (dropped on full close), it just keeps refreshing
+   *     while the browser is open; remember=true is the persistent sliding cookie.
+   */
+  alwaysPersistRefreshToken?: boolean;
+
   /** Access-token lifetime (seconds) used to compute tokenExpiry. Default 14m. */
   accessTokenTtl?: number;
+
+  /**
+   * Grace window (ms) during which a just-rotated result is replayed for the
+   * OLD refresh token, covering RSC cookie-write no-ops and in-flight
+   * stragglers. Set this <= your backend's single-use refresh grace window
+   * (e.g. 30s) so a straggler never re-presents a consumed token past it.
+   * Default 30000.
+   */
+  rotationGraceMs?: number;
 
   /**
    * Map an arbitrary backend response → canonical claims. REQUIRED.

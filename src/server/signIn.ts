@@ -36,10 +36,13 @@ export const buildSignIn = <TUser>(engine: Engine<TUser>) => {
     }
 
     const remember = mapped.remember ?? opts.remember;
+    // Persist the refresh token when remember is on, OR when the app opts to keep
+    // it for every session (short-lived access token that must be refreshed even
+    // without remember-me). remember then controls cookie lifetime only.
+    const persistRefresh = remember || config.alwaysPersistRefreshToken === true;
     const claims: SessionClaims<TUser> = {
       accessToken: mapped.accessToken,
-      // Only persist a refresh token when remember is on.
-      refreshToken: remember ? mapped.refreshToken : undefined,
+      refreshToken: persistRefresh ? mapped.refreshToken : undefined,
       tokenExpiry: Math.floor(Date.now() / 1000) + (mapped.ttlSeconds ?? ttl),
       user: mapped.user,
       remember,

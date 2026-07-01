@@ -1,6 +1,6 @@
 {
   "name": "@lankacom/auth",
-  "version": "0.0.1",
+  "version": "0.2.0",
   "description": "Reusable, app-agnostic auth library for Next.js App Router: encrypted-JWT session cookie, server-authoritative single-flight token rotation, remember-me sliding window, backend-brokered SSO.",
   "scripts": {
     "build": "node -e \"require(\\\"fs\\\").rmSync(\\\"dist\\\",{recursive:true,force:true})\" && tsup",
@@ -56,6 +56,11 @@
     "dist"
   ],
   "exports": {
+    "./register": {
+      "types": "./dist/register.d.ts",
+      "import": "./dist/register.js",
+      "default": "./dist/register.js"
+    },
     "./core": {
       "types": "./dist/core/index.d.ts",
       "import": "./dist/core/index.js",
