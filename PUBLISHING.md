@@ -43,7 +43,7 @@ pnpm publish --no-git-checks              # prepublishOnly runs typecheck + buil
 `--no-git-checks` lets pnpm publish from a dirty/branchy tree; drop it once the
 repo is clean and tagged if you want pnpm to enforce a clean publish.
 
-> Current published version: **0.2.0**. See [CHANGELOG.md](./CHANGELOG.md).
+> Current published version: **0.3.0**. See [CHANGELOG.md](./CHANGELOG.md).
 
 ### Verify it landed
 

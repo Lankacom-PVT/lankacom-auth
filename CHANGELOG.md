@@ -2,6 +2,67 @@
 
 All notable changes to `@lankacom/auth` are documented here.
 
+## 0.3.0
+
+### Added
+
+- **Transient vs fatal rotation-failure split.** Rotation failures are now
+  classified instead of uniformly surfacing `error: "RefreshTokenError"`:
+  - **FATAL → `"RefreshTokenError"`** (unchanged string — existing consumers
+    keep matching on it): the backend answered and rejected the refresh token.
+    Triggers: `backend.refresh` threw an error carrying
+    `code === "REFRESH_REJECTED"` (see tag convention below);
+    `mapTokenResponse` threw on the exchanged response (e.g. a gateway
+    200-with-`body.status !== 200` shape); or `validateUser` returned false.
+  - **TRANSIENT → `"RefreshTransientError"`** (new): the backend was
+    unreachable — any *untagged* throw from `backend.refresh` (fetch network
+    error, DNS, timeout, or a `res.json()` parse failure on an OK response).
+    The stale claims are returned with the error set, the cookie is neither
+    cleared nor rewritten, and nothing is cached in the rotator, so the next
+    request retries rotation. Users are no longer signed out by a backend
+    deploy or network blip.
+- **`REFRESH_TOKEN_ERROR` / `REFRESH_TRANSIENT_ERROR` / `SessionError`** —
+  exported from `@lankacom/auth/core` next to `SessionClaims`, whose `error`
+  field is now typed as the union.
+
+### Changed
+
+- **`requireSession()`** redirects only on no-session or the fatal
+  `"RefreshTokenError"`. A transient error passes through — the access token
+  may still be valid (consumers rotate ~1 min early) and rotation retries on
+  the next request.
+- **Session route handler** (`GET /api/auth/session`) returns `null` only for
+  the fatal `"RefreshTokenError"`. On `"RefreshTransientError"` it returns the
+  client snapshot (refresh token still stripped) **including the `error`
+  field**, so a client that refetches the session on socket reconnect does not
+  read a network blip as "signed out".
+
+### REFRESH_REJECTED tag convention
+
+For a rejection to be classified fatal, the app's `backend.refresh` adapter
+must throw an error carrying `code: "REFRESH_REJECTED"` whenever the refresh
+endpoint returns a non-OK status:
+
+```ts
+if (!res.ok) {
+  throw Object.assign(new Error(`refresh failed: ${res.status}`), {
+    code: "REFRESH_REJECTED",
+  });
+}
+```
+
+The engine detects the tag **by property, not `instanceof`** — the error
+crosses the package boundary from the consumer's adapter. Any throw *without*
+the tag is treated as transient.
+
+### Migration from 0.2.x
+
+- Update your `backend.refresh` adapter to tag rejections as above — without
+  the tag, a genuine 401 is classified transient and the session lingers (with
+  a stale token) instead of signing out.
+- Consumers that treated **any** truthy `error` as "sign out" must narrow to
+  `error === "RefreshTokenError"`.
+
 ## 0.2.0
 
 ### Added

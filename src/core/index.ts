@@ -1,4 +1,5 @@
-export type { SessionClaims, SessionStatus } from "./claims.js";
+export type { SessionClaims, SessionStatus, SessionError } from "./claims.js";
+export { REFRESH_TOKEN_ERROR, REFRESH_TRANSIENT_ERROR } from "./claims.js";
 export type { Register, RegisteredUser } from "@lankacom/auth/register";
 export { encodeSession, decodeSession, MIN_SECRET_LENGTH } from "./jwt.js";
 export type { EncodeOptions, DecodeOptions } from "./jwt.js";

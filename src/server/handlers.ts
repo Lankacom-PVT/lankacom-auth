@@ -1,6 +1,6 @@
 import "server-only";
 import { headers } from "next/headers";
-import type { SessionClaims } from "../core/index.js";
+import { REFRESH_TOKEN_ERROR, type SessionClaims } from "../core/index.js";
 import type { Engine } from "./engine.js";
 import { verifySameOrigin } from "./csrf.js";
 
@@ -22,7 +22,12 @@ export const buildHandlers = <TUser>(engine: Engine<TUser>) => {
   /** GET /api/auth/session — read-only snapshot for useSession(). */
   const session = async (): Promise<Response> => {
     const claims = await engine.getSession();
-    if (!claims || claims.error) {
+    // null ONLY when there is no session or rotation FATALLY failed (the
+    // backend rejected the refresh token). A transient failure (backend
+    // unreachable) returns the snapshot WITH the error field: clients that
+    // refetch the session on reconnect must not read a network blip as
+    // "signed out" and trigger a client-side sign-out.
+    if (!claims || claims.error === REFRESH_TOKEN_ERROR) {
       return Response.json(null, { status: 200 });
     }
     return Response.json(toClientSnapshot(claims), { status: 200 });

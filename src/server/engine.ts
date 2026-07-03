@@ -8,6 +8,8 @@ import {
   resolveCookieName,
   DEFAULT_ACCESS_TOKEN_TTL,
   DEFAULT_SIGNIN_PAGE,
+  REFRESH_TOKEN_ERROR,
+  REFRESH_TRANSIENT_ERROR,
   type AuthConfig,
   type SessionClaims,
 } from "../core/index.js";
@@ -17,6 +19,30 @@ interface RotationResult<TUser> {
   claims: SessionClaims<TUser>;
   encoded: string;
 }
+
+/**
+ * Internal marker for rotation failures where the backend was never reached
+ * (or never answered intelligibly): the refresh token was NOT judged invalid,
+ * so the session must survive and rotation must be retried. Never crosses the
+ * package boundary — callers only see claims.error = "RefreshTransientError".
+ */
+class TransientRotationError extends Error {
+  constructor(cause: unknown) {
+    super("Transient refresh failure (backend unreachable)", { cause });
+    this.name = "TransientRotationError";
+  }
+}
+
+/**
+ * FATAL iff the adapter tagged the throw with code === "REFRESH_REJECTED"
+ * (the app-side convention for "the backend answered with a rejection").
+ * Detected by property, NOT instanceof — the error crosses a package boundary
+ * from the consumer's adapter, so identity checks would not hold.
+ */
+const isTaggedRejection = (e: unknown): boolean =>
+  typeof e === "object" &&
+  e !== null &&
+  (e as { code?: unknown }).code === "REFRESH_REJECTED";
 
 /**
  * The shared server engine. Owns the one cookie writer, the one decoder, and
@@ -134,7 +160,20 @@ export const buildEngine = <TUser>(config: AuthConfig<TUser>) => {
     const oldToken = claims.refreshToken!;
     const { claims: next } = await rotator.rotate(oldToken, async () => {
       const h = await headers();
-      const raw = await config.backend.refresh(oldToken, { headers: h });
+      // Classify at the throw site, where we know which stage failed. A throw
+      // from the adapter is FATAL only when tagged REFRESH_REJECTED (backend
+      // answered: token invalid); anything else — fetch/DNS/timeout, or a
+      // res.json() parse failure on an OK response — means the backend never
+      // gave a verdict, so it's TRANSIENT. Every stage AFTER a successful
+      // exchange (mapTokenResponse, validateUser) runs on a real backend
+      // answer, so its throws stay fatal.
+      let raw: unknown;
+      try {
+        raw = await config.backend.refresh(oldToken, { headers: h });
+      } catch (e) {
+        if (isTaggedRejection(e)) throw e;
+        throw new TransientRotationError(e);
+      }
       const mapped = config.mapTokenResponse(raw, {
         kind: "refresh",
         remember: claims.remember,
@@ -167,10 +206,30 @@ export const buildEngine = <TUser>(config: AuthConfig<TUser>) => {
   };
 
   /**
+   * Rotation failed → return the stale claims with the classified error.
+   * FATAL ("RefreshTokenError"): the backend rejected the refresh token —
+   * consumers sign out. TRANSIENT ("RefreshTransientError"): the backend was
+   * unreachable — the cookie is left untouched (never cleared or rewritten
+   * here, and the Rotator caches only successes), so the very next request
+   * gets a fresh rotation attempt.
+   */
+  const failedRotation = (
+    claims: SessionClaims<TUser>,
+    e: unknown,
+  ): SessionClaims<TUser> => ({
+    ...claims,
+    error:
+      e instanceof TransientRotationError
+        ? REFRESH_TRANSIENT_ERROR
+        : REFRESH_TOKEN_ERROR,
+  });
+
+  /**
    * THE mutator. Decode → if expired & has refresh, rotate (single-flight) →
    * write cookie → return current claims. Returns null when no recoverable
-   * session; returns claims with error="RefreshTokenError" when the rotator
-   * gave up (so the client signs out).
+   * session; returns claims with error set when rotation failed —
+   * "RefreshTokenError" (fatal, sign out) or "RefreshTransientError"
+   * (backend unreachable; session kept, retried next request).
    */
   const getSession = async (): Promise<SessionClaims<TUser> | null> => {
     const claims = await readClaims();
@@ -183,18 +242,19 @@ export const buildEngine = <TUser>(config: AuthConfig<TUser>) => {
 
     try {
       return await rotate(claims);
-    } catch {
-      return { ...claims, error: "RefreshTokenError" };
+    } catch (e) {
+      return failedRotation(claims, e);
     }
   };
 
   /**
    * Force a rotation REGARDLESS of expiry — for the "got a 401 from the backend
    * with a token that still looks valid" case (early revocation, clock skew).
-   * Returns the rotated session, or claims with error="RefreshTokenError" when
-   * rotation fails. Returns the unchanged session if there is no refresh token,
-   * and null when there is no session at all. Single-flight, so calling it from
-   * several concurrent failed requests still rotates only once.
+   * Returns the rotated session, or claims with the classified error
+   * ("RefreshTokenError" fatal / "RefreshTransientError" backend unreachable)
+   * when rotation fails. Returns the unchanged session if there is no refresh
+   * token, and null when there is no session at all. Single-flight, so calling
+   * it from several concurrent failed requests still rotates only once.
    */
   const forceRefresh = async (): Promise<SessionClaims<TUser> | null> => {
     const claims = await readClaims();
@@ -202,14 +262,17 @@ export const buildEngine = <TUser>(config: AuthConfig<TUser>) => {
     if (!claims.refreshToken) return claims;
     try {
       return await rotate(claims);
-    } catch {
-      return { ...claims, error: "RefreshTokenError" };
+    } catch (e) {
+      return failedRotation(claims, e);
     }
   };
 
   const requireSession = async (): Promise<SessionClaims<TUser>> => {
     const session = await getSession();
-    if (!session || session.error) redirect(signInPath);
+    // A transient failure passes through: the access token may still be valid
+    // (consumers rotate ~1 min early), and the next request retries rotation.
+    // Only no-session and a fatal rejection push the user to sign-in.
+    if (!session || session.error === REFRESH_TOKEN_ERROR) redirect(signInPath);
     return session;
   };
 

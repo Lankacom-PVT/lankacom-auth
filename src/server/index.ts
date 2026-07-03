@@ -14,7 +14,9 @@ export interface ServerAuth<TUser> {
   /**
    * Force a single-flight rotation regardless of expiry — for the 401-retry
    * pattern (token rejected early by the backend). Returns the rotated session,
-   * or claims with error="RefreshTokenError" on failure, or null if no session.
+   * or claims with error set on failure ("RefreshTokenError" = backend rejected
+   * the token, sign out; "RefreshTransientError" = backend unreachable, keep
+   * the session and retry next request), or null if no session.
    */
   forceRefresh(): Promise<SessionClaims<TUser> | null>;
   /** Build authenticated app→backend headers from the current session. */
