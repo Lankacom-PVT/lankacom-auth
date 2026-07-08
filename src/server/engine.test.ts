@@ -7,14 +7,25 @@ vi.mock("server-only", () => ({}));
 const store = new Map<string, string>();
 const reqHeaders = new Map<string, string>();
 let cookieWrites = 0;
+// Records the (name, value, options) of the most recent set() so tests can
+// assert the attributes emitted on the wire (e.g. Secure/SameSite on delete).
+let lastSet:
+  | { name: string; value: string; options?: Record<string, unknown> }
+  | null = null;
 
 vi.mock("next/headers", () => ({
   cookies: async () => ({
     get: (name: string) =>
       store.has(name) ? { value: store.get(name)! } : undefined,
-    set: (name: string, value: string) => {
+    set: (name: string, value: string, options?: Record<string, unknown>) => {
       cookieWrites++;
-      store.set(name, value);
+      lastSet = { name, value, options };
+      // Model the browser: an empty value with maxAge<=0 removes the cookie.
+      if (value === "" && typeof options?.maxAge === "number" && options.maxAge <= 0) {
+        store.delete(name);
+      } else {
+        store.set(name, value);
+      }
     },
     delete: (name: string) => store.delete(name),
   }),
@@ -73,6 +84,7 @@ beforeEach(() => {
   store.clear();
   reqHeaders.clear();
   cookieWrites = 0;
+  lastSet = null;
 });
 
 describe("engine rotation: single-flight", () => {
@@ -232,5 +244,49 @@ describe("session route handler", () => {
 
     const res = await auth.handlers.session();
     expect(await res.json()).toBeNull();
+  });
+});
+
+describe("clearSession: cookie deletion matches the write path", () => {
+  it("over https emits Secure + SameSite on the __Secure- deletion cookie", async () => {
+    // Same signal writeCookie uses to decide the __Secure- prefix + Secure attr.
+    reqHeaders.set("x-forwarded-proto", "https");
+    const auth = createAuth<U>(baseConfig());
+
+    await auth.clearSession();
+
+    expect(lastSet).not.toBeNull();
+    // Name must carry the __Secure- prefix so we target the cookie the write
+    // path actually set over https.
+    expect(lastSet!.name).toBe(`__Secure-${COOKIE}`);
+    // The deletion must be an expired write (empty value + maxAge 0), NOT a
+    // bare delete() — otherwise the Set-Cookie lacks Secure and the browser
+    // rejects the delete for the __Secure- prefix, leaving the user logged in.
+    expect(lastSet!.value).toBe("");
+    expect(lastSet!.options?.maxAge).toBe(0);
+    expect(lastSet!.options?.secure).toBe(true);
+    expect(lastSet!.options?.sameSite).toBe("lax");
+    expect(lastSet!.options?.path).toBe("/");
+  });
+
+  it("forceSecureCookie forces Secure + __Secure- even without an https proto header", async () => {
+    const auth = createAuth<U>(baseConfig({ forceSecureCookie: true }));
+
+    await auth.clearSession();
+
+    expect(lastSet!.name).toBe(`__Secure-${COOKIE}`);
+    expect(lastSet!.options?.secure).toBe(true);
+    expect(lastSet!.value).toBe("");
+    expect(lastSet!.options?.maxAge).toBe(0);
+  });
+
+  it("over http clears the bare-named cookie without Secure", async () => {
+    const auth = createAuth<U>(baseConfig());
+
+    await auth.clearSession();
+
+    expect(lastSet!.name).toBe(COOKIE);
+    expect(lastSet!.options?.secure).toBe(false);
+    expect(lastSet!.options?.maxAge).toBe(0);
   });
 });

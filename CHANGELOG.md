@@ -2,6 +2,23 @@
 
 All notable changes to `@lankacom/auth` are documented here.
 
+## 0.3.2
+
+### Fixed
+
+- **`clearCookie` now emits `Secure`/`SameSite`/`Path` on the deletion cookie so
+  `__Secure-`-prefixed session cookies are actually cleared on logout (browsers
+  reject `__Secure-` deletes without `Secure`).** Over HTTPS the session cookie
+  is written with the `__Secure-` name prefix and the `Secure` attribute, but the
+  old delete path used `cookieStore.delete(name)`, which emits a bare expired
+  `Set-Cookie` with no `Secure` (or `SameSite`). Browsers reject any `Set-Cookie`
+  for a `__Secure-`-prefixed name that lacks `Secure`, so the deletion was
+  silently ignored and the original cookie survived — the user stayed logged in
+  after signout. `clearCookie` now clears by writing an empty, immediately
+  expired cookie (`maxAge: 0`) whose attributes mirror the write path exactly
+  (via `resolveCookieAttributes`), keeping write and clear symmetric so the
+  delete targets — and is accepted for — the same `__Secure-` cookie.
+
 ## 0.3.0
 
 ### Added

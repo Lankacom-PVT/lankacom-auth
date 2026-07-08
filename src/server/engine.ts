@@ -131,7 +131,25 @@ export const buildEngine = <TUser>(config: AuthConfig<TUser>) => {
   const clearCookie = async (): Promise<void> => {
     try {
       const store = await cookies();
-      store.delete(await cookieName());
+      // Delete by WRITING an expired cookie that carries the same attributes as
+      // the write path (secure/sameSite/path). A bare delete(name) emits a
+      // Set-Cookie without Secure; browsers reject any Set-Cookie for a
+      // `__Secure-`-prefixed name that lacks Secure, so the deletion is ignored
+      // and the original cookie survives (user stays logged in after signout).
+      // Mirror writeCookie's attribute resolution so write and clear stay
+      // symmetric and target the exact same cookie. remember=false is fine —
+      // it only affects maxAge, which we override to 0 to expire immediately.
+      const attrs = resolveCookieAttributes(config.cookie, {
+        isHttps: await isHttps(),
+        remember: false,
+      });
+      store.set(attrs.name, "", {
+        httpOnly: attrs.httpOnly,
+        secure: attrs.secure,
+        sameSite: attrs.sameSite,
+        path: attrs.path,
+        maxAge: 0,
+      });
     } catch {
       // read-only context — ignore.
     }
