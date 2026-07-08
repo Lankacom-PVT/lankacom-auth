@@ -1,71 +1,62 @@
-# Publishing `@lankacom/auth` to Gitea
+# Publishing `@lankacom/auth`
 
-This package publishes to **Gitea's built-in npm registry**, scoped to the
-`Lankacom` owner on `git-v2.lankapanel.net`.
+This package is published publicly to the **npm registry** under the
+`@lankacom` scope, with source on **GitHub** at
+[`Lankacom-PVT/lankacom-auth`](https://github.com/Lankacom-PVT/lankacom-auth).
 
-| Value         | This package                                            |
-| ------------- | ------------------------------------------------------- |
-| Registry      | `https://git-v2.lankapanel.net/api/packages/Lankacom/npm/` |
-| Scope         | `@lankacom`                                             |
-| Token scope   | `write:package` (publish) / `read:package` (install)    |
+| Value       | This package                                     |
+| ----------- | ------------------------------------------------ |
+| Registry    | `https://registry.npmjs.org/` (public npm)       |
+| Scope       | `@lankacom` (npm org)                             |
+| Access      | `public` (set via `publishConfig.access`)        |
+| Source      | `github.com/Lankacom-PVT/lankacom-auth`              |
+| License     | Apache-2.0                                        |
 
 ---
 
 ## One-time setup
 
-### 1. Create a Gitea access token
+### 1. npm
 
-`https://git-v2.lankapanel.net` → avatar → **Settings → Applications →
-Manage Access Tokens → Generate New Token** → scope **`write:package`**.
-Copy it (shown once). You must be a member of the `Lankacom` org with package
-write permission.
-
-### 2. Create the local `.npmrc`
+You must be a member of the `lankacom` npm org with publish rights. Then:
 
 ```bash
-cp .npmrc.example .npmrc
-# edit .npmrc — replace GITEA_TOKEN with your token
+npm login          # authenticate this machine against registry.npmjs.org
+npm whoami         # confirm
 ```
 
-`.npmrc` is gitignored, so the token is never committed.
+The `@lankacom` scope resolves to the public registry by default; no `.npmrc`
+scope override is needed. (The old Gitea `.npmrc` is gitignored — remove it if
+present so it doesn't redirect the scope.)
+
+### 2. GitHub
+
+Repo lives at `github.com/Lankacom-PVT/lankacom-auth`. Push with the `origin`
+remote already configured.
 
 ---
 
 ## Publish
 
-Gitea **rejects re-publishing the same version**, so bump first:
+npm **rejects re-publishing the same version**, so bump first:
 
 ```bash
-npm version patch --no-git-tag-version    # 0.0.5 → 0.0.6 (or minor / major)
-pnpm publish --no-git-checks              # prepublishOnly runs typecheck + build
+npm version patch --no-git-tag-version    # 0.3.0 → 0.3.1 (or minor / major)
+pnpm publish                              # prepublishOnly runs typecheck + build
+                                          # publishConfig.access=public applies
 ```
-
-`--no-git-checks` lets pnpm publish from a dirty/branchy tree; drop it once the
-repo is clean and tagged if you want pnpm to enforce a clean publish.
-
-> Current published version: **0.3.0**. See [CHANGELOG.md](./CHANGELOG.md).
 
 ### Verify it landed
 
 ```bash
-npm view @lankacom/auth version \
-  --registry https://git-v2.lankapanel.net/api/packages/Lankacom/npm/
+npm view @lankacom/auth version
 ```
 
-Or browse **Gitea → Lankacom → Packages**. To delete a bad version:
-**Packages → @lankacom/auth → version → Delete**.
+Or browse **https://www.npmjs.com/package/@lankacom/auth**.
 
 ---
 
 ## Consuming from your Next.js apps
-
-In each app add an `.npmrc` (commit it WITHOUT the token; inject the token via
-env/CI, or use a read-only token):
-
-```ini
-@lankacom:registry=https://git-v2.lankapanel.net/api/packages/Lankacom/npm/
-//git-v2.lankapanel.net/api/packages/Lankacom/npm/:_authToken=${GITEA_TOKEN}
-```
 
 ```bash
 pnpm add @lankacom/auth
@@ -95,7 +86,8 @@ declare module "@lankacom/auth/register" {
 ## Release checklist
 
 1. `pnpm typecheck && pnpm build` — green (also runs via `prepublishOnly`).
-2. `npm version patch|minor|major --no-git-tag-version`.
-3. `pnpm publish --no-git-checks`.
-4. Verify with `npm view … version`.
-5. In consuming apps: `pnpm add @lankacom/auth@<new-version>`.
+2. `npm version patch|minor|major` — tag the release.
+3. `git push && git push --tags`.
+4. `pnpm publish`.
+5. Verify with `npm view @lankacom/auth version`.
+6. In consuming apps: `pnpm add @lankacom/auth@<new-version>`.

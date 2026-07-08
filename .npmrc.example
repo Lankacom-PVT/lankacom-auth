@@ -1,16 +1,13 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Gitea npm registry config for @lankacom/auth
+# npm config for @lankacom/auth (public npm registry)
 #
-# Copy this file to `.npmrc` and replace GITEA_TOKEN with a Gitea access token
-# that has the `write:package` scope (publish) or `read:package` (install only).
-# `.npmrc` is gitignored so your token never gets committed.
+# For local publishing you usually don't need an .npmrc at all — just run
+# `npm login`. The @lankacom scope resolves to the public registry by default.
+#
+# This example is only for CI / automated publishing with an npm automation
+# token. Copy to `.npmrc` and inject NPM_TOKEN via your CI secret store.
+# `.npmrc` is gitignored so the token is never committed.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Route the @lankacom scope to the Gitea registry (publish + install).
-@lankacom:registry=https://git-v2.lankapanel.net/api/packages/Lankacom/npm/
-
-# Auth for that registry. The key must match the registry host+path above.
-//git-v2.lankapanel.net/api/packages/Lankacom/npm/:_authToken=GITEA_TOKEN
-
-# Optional: pnpm/npm sometimes auth against the bare host too.
-//git-v2.lankapanel.net/:_authToken=GITEA_TOKEN
+# Auth for the public npm registry (used by `npm publish` in CI).
+//registry.npmjs.org/:_authToken=${NPM_TOKEN}

@@ -5,4 +5,7 @@ dist
 .turbo
 coverage
 .npmrc
+.npmrc.*
+!.npmrc.example
+*.bak
 *.tgz
