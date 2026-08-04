@@ -6,6 +6,10 @@ import {
   decodeSession,
   resolveCookieAttributes,
   resolveCookieName,
+  chunkCookieName,
+  chunkCookieValue,
+  readChunkedCookie,
+  MAX_COOKIE_CHUNKS,
   DEFAULT_ACCESS_TOKEN_TTL,
   DEFAULT_SIGNIN_PAGE,
   REFRESH_TOKEN_ERROR,
@@ -115,13 +119,30 @@ export const buildEngine = <TUser>(config: AuthConfig<TUser>) => {
         isHttps: await isHttps(),
         remember,
       });
-      store.set(attrs.name, encoded, {
+      const opts = {
         httpOnly: attrs.httpOnly,
         secure: attrs.secure,
         sameSite: attrs.sameSite,
         path: attrs.path,
         ...(attrs.maxAge !== undefined ? { maxAge: attrs.maxAge } : {}),
+      };
+
+      const parts = chunkCookieValue(encoded);
+      parts.forEach((part, i) => {
+        store.set(chunkCookieName(attrs.name, i), part, opts);
       });
+
+      /*
+       * Expire any chunk left over from a LONGER previous session. Without this
+       * a shrinking session leaves `.2` behind, and the next read concatenates
+       * it onto the new value — producing a corrupt token and a spurious
+       * logout. Bounded by the same ceiling the reader uses.
+       */
+      for (let i = parts.length; i < MAX_COOKIE_CHUNKS; i += 1) {
+        const name = chunkCookieName(attrs.name, i);
+        if (!store.get(name)) break;
+        store.set(name, "", { ...opts, maxAge: 0 });
+      }
     } catch {
       // cookies().set() no-ops in RSC render contexts. The recent-result cache
       // in Rotator covers the dropped-write case on the next request.
@@ -143,13 +164,30 @@ export const buildEngine = <TUser>(config: AuthConfig<TUser>) => {
         isHttps: await isHttps(),
         remember: false,
       });
-      store.set(attrs.name, "", {
+      const expire = {
         httpOnly: attrs.httpOnly,
         secure: attrs.secure,
         sameSite: attrs.sameSite,
         path: attrs.path,
         maxAge: 0,
-      });
+      };
+
+      /*
+       * Expire EVERY chunk, not just the first. Leaving `.1` behind would not
+       * keep the user signed in on its own — a partial set cannot decrypt — but
+       * it would strand a cookie carrying live token material in the browser,
+       * and the Edge gate would still see a session cookie present and let the
+       * request through to a redirect loop.
+       *
+       * The base name is always cleared even when absent from the store, so a
+       * signout still emits the deletion for the common single-cookie case.
+       */
+      store.set(attrs.name, "", expire);
+      for (let i = 1; i < MAX_COOKIE_CHUNKS; i += 1) {
+        const name = chunkCookieName(attrs.name, i);
+        if (!store.get(name)) break;
+        store.set(name, "", expire);
+      }
     } catch {
       // read-only context — ignore.
     }
@@ -157,7 +195,9 @@ export const buildEngine = <TUser>(config: AuthConfig<TUser>) => {
 
   const readClaims = async (): Promise<SessionClaims<TUser> | null> => {
     const store = await cookies();
-    const raw = store.get(await cookieName())?.value;
+    // Rejoins `.1`, `.2`, … when the session was chunked; returns the single
+    // cookie untouched otherwise, so unchunked sessions read exactly as before.
+    const raw = readChunkedCookie(store, await cookieName());
     if (!raw) return null;
     return decodeSession<TUser>(raw, config.secret, {
       ...(config.issuer ? { issuer: config.issuer } : {}),

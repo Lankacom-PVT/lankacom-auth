@@ -6,6 +6,10 @@ export type { EncodeOptions, DecodeOptions } from "./jwt.js";
 export {
   resolveCookieName,
   resolveCookieAttributes,
+  chunkCookieName,
+  chunkCookieValue,
+  readChunkedCookie,
+  MAX_COOKIE_CHUNKS,
 } from "./cookie.js";
 export type { CookieConfig, ResolvedCookieAttributes } from "./cookie.js";
 export {

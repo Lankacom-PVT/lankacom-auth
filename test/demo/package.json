@@ -9,7 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@lankacom/auth": "^0.0.5",
+    "@lankacom/auth": "link:../..",
     "next": "16.2.9",
     "react": "19.2.4",
     "react-dom": "19.2.4"

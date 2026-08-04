@@ -33,6 +33,13 @@ export const proxyGate = (
   options: ProxyGateOptions,
 ): ProxyGateDecision => {
   if (!options.isProtected(pathname)) return {};
+  /*
+   * Chunk-safe as written: a chunked session stores its FIRST part under the
+   * plain base name and any overflow under `.1`, `.2`, … so chunk 0 exists
+   * whenever a session does. Still presence-only — a partial or corrupt set is
+   * caught downstream by getSession(), which decodes and treats failure as no
+   * session.
+   */
   const cookie = cookies.get(options.cookieName);
   if (cookie && cookie.value.length > 0) return {};
   return { redirectTo: options.signInPath ?? "/auth" };

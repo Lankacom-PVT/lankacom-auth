@@ -15,6 +15,36 @@ const ALG = "dir";
 const ENC = "A256GCM";
 
 /**
+ * DEFLATE the claims before encrypting.
+ *
+ * The cookie carries two JWTs, which are base64 text and compress well — and
+ * the JWE base64s its ciphertext, inflating whatever it wraps by ~1.37x. Without
+ * this, a session holding a full permission mask plus both tokens lands near
+ * 3.9KB against a 4096-byte per-cookie browser limit that counts the name and
+ * attributes too. Past that the browser silently drops the cookie and the
+ * session never persists.
+ *
+ * Safe here because nothing attacker-controlled reaches these claims — they are
+ * server-derived tokens, ids and bitmasks. Compression-oracle attacks
+ * (CRIME/BREACH) need chosen plaintext sharing a compression context with a
+ * secret. IF USER-SUPPLIED FREE TEXT IS EVER ADDED TO `SessionClaims`, this
+ * decision has to be revisited.
+ *
+ * Decoding stays backwards-compatible: `zip` is a per-token header, so cookies
+ * minted before this was enabled still decrypt unchanged. No forced logout.
+ */
+const ZIP = "DEF";
+
+/**
+ * Ceiling on the decompressed payload — a decompression-bomb guard.
+ *
+ * jose defaults to 250KB. A session is a few kilobytes, so this is deliberately
+ * far tighter: a cookie inflating past it is malformed or hostile, and either
+ * way decodes to "no session" via the catch below.
+ */
+const MAX_DECOMPRESSED_BYTES = 64 * 1024;
+
+/**
  * Minimum secret length. The AES-256 key is derived directly from this secret
  * with a single SHA-256 (no work factor), so the secret's own entropy IS the
  * session-security boundary. A short/guessable secret is directly brute-forceable
@@ -53,7 +83,7 @@ export const encodeSession = async <TUser>(
   const key = await deriveKey(secret);
   const nowSec = Math.floor(Date.now() / 1000);
   let builder = new EncryptJWT({ claims } as Record<string, unknown>)
-    .setProtectedHeader({ alg: ALG, enc: ENC })
+    .setProtectedHeader({ alg: ALG, enc: ENC, zip: ZIP })
     .setIssuedAt(nowSec)
     .setExpirationTime(nowSec + maxAgeSeconds);
   if (issuer) builder = builder.setIssuer(issuer);
@@ -78,6 +108,10 @@ export const decodeSession = async <TUser>(
     // jose verifies iss/aud when the corresponding option is passed, and throws
     // on mismatch (→ treated as no session, same as tamper/expiry).
     const { payload } = await jwtDecrypt(token, key, {
+      // Bound the decompressed size. jose's 250KB default is far larger than
+      // any real session, and a cookie that inflates past this is malformed or
+      // hostile — the catch below turns either into "no session".
+      maxDecompressedLength: MAX_DECOMPRESSED_BYTES,
       ...(options.issuer ? { issuer: options.issuer } : {}),
       ...(options.audience ? { audience: options.audience } : {}),
     });
