@@ -36,9 +36,35 @@ remote already configured.
 
 ---
 
-## Publish
+## Automated release (GitHub Actions)
 
-npm **rejects re-publishing the same version**, so bump first:
+Pushing a `v*` tag runs `.github/workflows/release-npm.yml`. It checks the tag
+matches `package.json`'s version, skips if that version is already on npm,
+then installs, typechecks, tests, builds and publishes. Pre-release versions
+(`1.2.0-beta.1`) go to the `next` dist-tag.
+
+```bash
+npm version patch --no-git-tag-version    # bump package.json (+ update CHANGELOG.md)
+git commit -am "release: v0.4.2"
+git tag v0.4.2
+git push --follow-tags                    # the tag push triggers the release
+```
+
+It authenticates with npm **trusted publishing** (OIDC), so there is no npm
+token to store or rotate, and each release gets a provenance attestation.
+One-time setup on npmjs.com → `@lankacom/auth` → Settings → Trusted
+publishing → GitHub Actions:
+
+| Field                  | Value              |
+| ---------------------- | ------------------ |
+| Organization or user   | `Lankacom-PVT`     |
+| Repository             | `lankacom-auth`    |
+| Workflow filename      | `release-npm.yml`  |
+
+## Publish manually
+
+The fallback when CI is unavailable. npm **rejects re-publishing the same
+version**, so bump first:
 
 ```bash
 npm version patch --no-git-tag-version    # 0.3.0 → 0.3.1 (or minor / major)
@@ -85,9 +111,9 @@ declare module "@lankacom/auth/register" {
 
 ## Release checklist
 
-1. `pnpm typecheck && pnpm build` — green (also runs via `prepublishOnly`).
-2. `npm version patch|minor|major` — tag the release.
-3. `git push && git push --tags`.
-4. `pnpm publish`.
-5. Verify with `npm view @lankacom/auth version`.
+1. `pnpm typecheck && pnpm test && pnpm build` — green.
+2. `npm version patch|minor|major --no-git-tag-version` and a `CHANGELOG.md` entry.
+3. Commit, then `git tag v<version>` matching `package.json`.
+4. `git push --follow-tags` — the **Release to npm** workflow publishes it.
+5. Check the workflow run on GitHub, then `npm view @lankacom/auth version`.
 6. In consuming apps: `pnpm add @lankacom/auth@<new-version>`.

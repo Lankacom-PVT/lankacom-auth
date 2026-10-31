@@ -1,0 +1,111 @@
+name: Release to npm
+
+# Publishes @lankacom/auth when a version tag is pushed, e.g.:
+#   npm version patch --no-git-tag-version   # bump package.json
+#   git commit -am "release: v0.4.2" && git tag v0.4.2 && git push --follow-tags
+#
+# Auth is npm trusted publishing (OIDC): no npm token is stored anywhere and
+# npm adds a provenance attestation automatically. One-time setup on
+# npmjs.com -> @lankacom/auth -> Settings -> Trusted publishing -> GitHub Actions:
+#   Organization or user: Lankacom-PVT
+#   Repository:           lankacom-auth
+#   Workflow filename:    release-npm.yml
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write # lets npm exchange the GitHub OIDC token for a publish token
+
+concurrency:
+  group: release-npm-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Installs the pnpm version pinned in package.json's packageManager field.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      # Node 26 bundles npm 11.x; trusted publishing needs npm >= 11.5.1.
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: pnpm
+
+      - name: Check the tag matches package.json
+        id: vars
+        shell: bash
+        run: |
+          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+          PKG_NAME=$(node -p "require('./package.json').name")
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag v$TAG_VERSION does not match package.json version $PKG_VERSION. Bump package.json before tagging."
+            exit 1
+          fi
+          echo "name=$PKG_NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$PKG_VERSION" >> "$GITHUB_OUTPUT"
+
+      # npm rejects re-publishing a version; skip cleanly when a tag is re-pushed.
+      - name: Check the version is not on npm yet
+        id: published
+        shell: bash
+        run: |
+          if npm view "${{ steps.vars.outputs.name }}@${{ steps.vars.outputs.version }}" version >/dev/null 2>&1; then
+            echo "::notice::${{ steps.vars.outputs.name }}@${{ steps.vars.outputs.version }} is already on npm, nothing to publish."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install dependencies
+        if: steps.published.outputs.exists == 'false'
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        if: steps.published.outputs.exists == 'false'
+        run: pnpm typecheck
+
+      - name: Test
+        if: steps.published.outputs.exists == 'false'
+        run: pnpm test
+
+      # `npm publish` (not `pnpm publish`) because the npm CLI performs the
+      # trusted-publishing OIDC exchange. Its prepublishOnly script still runs
+      # `pnpm typecheck && pnpm build`, so dist is always freshly built.
+      # Versions with a pre-release suffix (v1.2.0-beta.1) go to the "next"
+      # dist-tag so they never become "latest".
+      - name: Publish to npm
+        if: steps.published.outputs.exists == 'false'
+        shell: bash
+        run: |
+          if [[ "${{ steps.vars.outputs.version }}" == *-* ]]; then
+            npm publish --access public --tag next
+          else
+            npm publish --access public
+          fi
+
+      - name: Verify it landed
+        if: steps.published.outputs.exists == 'false'
+        shell: bash
+        run: |
+          for i in 1 2 3 4 5 6; do
+            if npm view "${{ steps.vars.outputs.name }}@${{ steps.vars.outputs.version }}" version >/dev/null 2>&1; then
+              echo "Published ${{ steps.vars.outputs.name }}@${{ steps.vars.outputs.version }}"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::warning::Publish succeeded but the registry has not shown the version yet; check npmjs.com."
