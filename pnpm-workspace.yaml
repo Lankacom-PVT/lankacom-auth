@@ -1,2 +1,10 @@
-onlyBuiltDependencies:
-  - esbuild
+allowBuilds:
+  esbuild: true
+  # Pulled in by the `next` dev dependency for image optimisation; the library
+  # never uses it, and pnpm 10 skipped its install script too.
+  sharp: false
+
+# TEMPORARY (2026-10-31): release-age rule off during the manual full upgrade,
+# so we can take the newest versions. Remove this line (back to pnpm's default
+# 1-day rule) once the upgrade is finished.
+minimumReleaseAge: 0
