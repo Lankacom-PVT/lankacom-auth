@@ -2,6 +2,19 @@
 
 All notable changes to `@lankacom/auth` are documented here.
 
+## 0.4.1
+
+### Changed
+
+- **Dependency and tooling refresh; no API or behaviour change.** Runtime
+  dependency `jose` 6.2.3 → 6.2.14. The build moves to tsup 9 and TypeScript 7
+  (`tsc` from `@typescript/native`; tsup's declaration build keeps the TS 6 API
+  via `@typescript/typescript6`), tests to Vitest 5, and the repo to pnpm 12.
+  The JavaScript output is byte-identical to 0.4.0. The `.d.ts` files only
+  re-spell type exports (`export type { X }` instead of `export { type X }`),
+  and `server/index.d.ts` imports its types from `../core/index.js` instead of
+  a hashed chunk.
+
 ## 0.3.2
 
 ### Fixed
